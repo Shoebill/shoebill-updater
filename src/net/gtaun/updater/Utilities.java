@@ -47,8 +47,7 @@ public class Utilities {
             response.append('\r');
         }
         rd.close();
-        if(connection != null)
-            connection.disconnect();
+        connection.disconnect();
         return response.toString();
     }
 
@@ -58,7 +57,7 @@ public class Utilities {
             return FileType.DependencyManager;
         else if(fileName.contains("shoebill-launcher") && fileName.endsWith(".jar"))
             return FileType.Launcher;
-        else if(fileName.contains("shoebill") && (fileName.endsWith(".dll") || fileName.endsWith(".so")))
+        else if(fileName.contains("shoeb") && (fileName.endsWith("ill.dll") || fileName.endsWith("ill")))
             return FileType.Plugin;
         else
             return null;
@@ -76,11 +75,7 @@ public class Utilities {
             byte[] hashedBytes = digest.digest();
             inputStream.close();
             return convertByteArrayToHexString(hashedBytes);
-        } catch (FileNotFoundException e) {
-            e.printStackTrace();
-        } catch (NoSuchAlgorithmException e) {
-            e.printStackTrace();
-        } catch (IOException e) {
+        } catch (NoSuchAlgorithmException | IOException e) {
             e.printStackTrace();
         }
         return null;

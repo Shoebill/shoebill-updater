@@ -13,7 +13,7 @@ import java.nio.channels.ReadableByteChannel;
 import java.util.*;
 
 /**
- * Created by MarvinWindows on 23.12.2014 in project shoebill-updater.
+ * Created by marvin on 23.12.2014 in project shoebill-updater.
  * Copyright (c) 2014 Marvin Haschker. All rights reserved.
  */
 public class Updater {
@@ -21,36 +21,36 @@ public class Updater {
     private static String OS = System.getProperty("os.name").toLowerCase();
     private OSType currentOS = null;
     private HashMap<File, String> fileHashes;
-    private static String UpdateURL = "http://catboy5.bplaced.net/update.php";
+    private static final String UpdateURL = "http://catboy5.bplaced.net/updater/update.php";
     private static List<FileType> missingFileTypes;
 
     public Updater() {
-        fileHashes = new HashMap<File, String>();
-        missingFileTypes = new ArrayList<FileType>(Arrays.asList(FileType.values()));
+        fileHashes = new HashMap<>();
+        missingFileTypes = new ArrayList<>(Arrays.asList(FileType.values()));
         currentOS = Utilities.parseOS(OS);
     }
 
-    public void update() {
+    public void update(boolean download) {
         File sampServerFile = null;
         if(currentOS == null) {
             System.err.println("Unsupported OS - " + OS);
             return;
         }
-        else if(currentOS == OSType.Windows) sampServerFile = new File("samp-server.exe");
-        else if(currentOS == OSType.Solaris || currentOS == OSType.Mac || currentOS == OSType.Unix) sampServerFile = new File("samp03svr");
+        else if(currentOS == OSType.Windows || currentOS == OSType.Mac) sampServerFile = new File("samp-server.exe");
+        else if(currentOS == OSType.Solaris || currentOS == OSType.Unix) sampServerFile = new File("samp03svr");
         if(sampServerFile == null) {
             System.err.println("Unsupported OS - " + OS);
             return;
         }
         if(!Utilities.checkForDirectory(sampServerFile)) return;
-        checkForUpdates(new File("shoebill", "bootstrap"), new File("plugins"));
+        checkForUpdates(new File("shoebill", "bootstrap"), new File("plugins"), download);
     }
 
-    private void checkForUpdates(File bootStrap, File pluginDir) {
+    private void checkForUpdates(File bootStrap, File pluginDir, boolean download) {
         addFileHashes(bootStrap);
         addFileHashes(pluginDir);
         checkMissingFiles();
-        getUpdateInformation();
+        getUpdateInformation(download);
     }
 
     private void checkMissingFiles() {
@@ -67,8 +67,8 @@ public class Updater {
                     break;
 
                 case Plugin:
-                    if(currentOS == OSType.Windows) fileHashes.put(new File("plugins", "Shoebill.dll"), "");
-                    else fileHashes.put(new File("plugins", "Shoebill.so"), "");
+                    if(currentOS == OSType.Windows || currentOS == OSType.Mac) fileHashes.put(new File("plugins", "Shoebill.dll"), "");
+                    else fileHashes.put(new File("plugins", "Shoebill"), "");
                     break;
             }
             System.out.println(fileType.toString() + " was missing and was added to download queue.");
@@ -92,8 +92,9 @@ public class Updater {
                     missingFileTypes.remove(FileType.Launcher);
                 System.out.println("Added " + file + " for update queue.");
             }
-            else if(file.getName().toLowerCase().startsWith("shoebill") && ((file.getName().toLowerCase().endsWith(".dll") && OSType.Windows == currentOS) ||
-                    (file.getName().toLowerCase().endsWith(".so") && currentOS != OSType.Windows))) {
+            else if(file.getName().toLowerCase().startsWith("shoeb") && ((currentOS == OSType.Windows || currentOS == OSType.Mac) &&
+                    file.getName().toLowerCase().endsWith("ill.dll")) ||
+                    (currentOS == OSType.Unix && file.getName().toLowerCase().endsWith("ill"))) {
                 fileHashes.put(file, Utilities.hashFile(file, "MD5"));
                 if(missingFileTypes.contains(FileType.Plugin))
                     missingFileTypes.remove(FileType.Plugin);
@@ -102,79 +103,114 @@ public class Updater {
         }
     }
 
-    private void getUpdateInformation() {
+    private void getUpdateInformation(boolean download) {
         JSONArray jsonArray = new JSONArray();
         for (Map.Entry<File, String> mapEntry : fileHashes.entrySet()) {
             JSONObject jsonObject = new JSONObject();
             jsonObject.put("Filename", mapEntry.getKey().getName());
             jsonObject.put("Filetype", Utilities.getFileType(mapEntry.getKey().getName()).toString());
             jsonObject.put("Filehash", mapEntry.getValue());
+            jsonObject.put("Fullpath", mapEntry.getKey().getPath());
             jsonArray.add(jsonObject);
         }
         try {
             String response = Utilities.excutePost(UpdateURL, "json=" + jsonArray.toString());
             JSONArray array=(JSONArray) JSONValue.parse(response);
-            downloadNewVersions(array);
+            downloadNewVersions(array, download);
         } catch (IOException e) {
             System.err.println("The request (" + UpdateURL + ") could not be send. Please make sure that you are connected to the internet.");
             System.err.println("Try again later.");
         }
     }
 
-    private void downloadNewVersions(JSONArray array) {
-        if(array.size() == 0) {
+    private void downloadNewVersions(JSONArray array, boolean download) {
+        if(array == null) {
+            System.out.println("An error occurred while downloading.");
+            return;
+        } else if(array.size() == 0) {
             System.out.println("");
             System.out.println("All files are up-to-date!");
             return;
         }
-        System.out.println("/***********************************\\");
-        System.out.println("  The download will now be started ");
-        System.out.println("  Total files to download: " + array.size());
-        System.out.println("/***********************************\\");
-        System.out.println("");
         int failedDownloads = 0;
-        for(Object object : array) {
-            JSONObject jsonObject = (JSONObject)object;
-            FileType fileType = FileType.valueOf((String) jsonObject.get("Filetype"));
-            try {
-                URL website = new URL((String) jsonObject.get("Filedownload"));
-                File file;
-                switch (fileType)
-                {
-                    case DependencyManager:
-                    case Launcher:
-                        file = new File(new File("shoebill", "bootstrap"), (String) jsonObject.get("Filename"));
-                        break;
+        if (download) {
+            System.out.println("/***********************************\\");
+            System.out.println("  The download will now be started ");
+            System.out.println("  Total files to download: " + array.size());
+            System.out.println("/***********************************\\");
+            System.out.println("");
+            failedDownloads = 0;
+            for(Object object : array) {
+                JSONObject jsonObject = (JSONObject)object;
+                FileType fileType = FileType.valueOf((String) jsonObject.get("Filetype"));
+                File oldFile = new File((String) jsonObject.get("Oldfile"));
+                try {
+                    if(!oldFile.delete())
+                        System.out.println("Oldfile (" + oldFile + ") could not be deleted.");
+                    URL website = new URL((String) jsonObject.get("Filedownload"));
+                    File file;
+                    switch (fileType)
+                    {
+                        case DependencyManager:
+                        case Launcher:
+                            file = new File(new File("shoebill", "bootstrap"), (String) jsonObject.get("Filename"));
+                            break;
 
-                    case Plugin:
-                        file = new File("plugins", (String) jsonObject.get("Filename"));
-                        break;
+                        case Plugin:
+                            file = new File("plugins", (String) jsonObject.get("Filename"));
+                            break;
 
-                    default:
-                        throw new Exception("Invalid file type " + fileType);
+                        default:
+                            throw new Exception("Invalid file type " + fileType);
+                    }
+                    if(file.exists()) {
+                        if(!file.delete())
+                            throw new Exception("The file " + file + " could not be deleted. Make sure it's not in use!");
+                    }
+                    System.out.println("Starting download for " + file + " (" + website + ")");
+                    ReadableByteChannel rbc = Channels.newChannel(website.openStream());
+                    FileOutputStream fos = new FileOutputStream(file);
+                    fos.getChannel().transferFrom(rbc, 0, Long.MAX_VALUE);
+                    rbc.close();
+                    fos.close();
+                    System.out.println("File " + file + " was successfully downloaded and replaced.");
+                } catch (IOException ex) {
+                    System.err.println("File (" + jsonObject.get("Filename") + " - " + jsonObject.get("Filedownload") + ") could not be downloaded.");
+                    ex.printStackTrace();
+                    failedDownloads++;
+                } catch (Exception e) {
+                    e.printStackTrace();
+                    failedDownloads++;
                 }
-                if(file.exists()) {
-                    if(!file.delete())
-                        throw new Exception("The file " + file + " could not be deleted. Make sure it's not in use!");
-                }
-                System.out.println("Starting download for " + file + " (" + website + ")");
-                ReadableByteChannel rbc = Channels.newChannel(website.openStream());
-                FileOutputStream fos = new FileOutputStream(file);
-                fos.getChannel().transferFrom(rbc, 0, Long.MAX_VALUE);
-                rbc.close();
-                fos.close();
-                System.out.println("File " + file + " was successfully downloaded and replaced.");
-            } catch (IOException ex) {
-                System.err.println("File (" + jsonObject.get("Filename") + " - " + jsonObject.get("Filedownload") + ") could not be downloaded.");
-                ex.printStackTrace();
-                failedDownloads++;
-            } catch (Exception e) {
-                e.printStackTrace();
-                failedDownloads++;
             }
-        }
+            downloadsFinished(failedDownloads);
+        } else {
+            if(array.size() > 0) {
+                System.out.println("");
+                System.out.println("******* UPDATES ARE AVAILABLE ********");
+                System.out.println("The following files could be updated (please use the shoebill-updater):");
+                System.out.println("");
+                for (Object object : array) {
+                    JSONObject jsonObject = (JSONObject) object;
+                    FileType fileType = FileType.valueOf((String) jsonObject.get("Filetype"));
+                    File file = null;
+                    switch (fileType) {
+                        case DependencyManager:
+                        case Launcher:
+                            file = new File(new File("shoebill", "bootstrap"), (String) jsonObject.get("Filename"));
+                            break;
 
-        downloadsFinished(failedDownloads);
+                        case Plugin:
+                            file = new File("plugins", (String) jsonObject.get("Filename"));
+                            break;
+                    }
+                    System.out.println(file.toString());
+                }
+                System.out.printf("");
+                System.out.println("**************************************");
+                System.out.println("");
+            } else System.out.println("********* No internal updates available *********");
+        }
     }
 
     private void downloadsFinished(int failedDownloads) {
@@ -206,7 +242,8 @@ public class Updater {
         File onlineModeOnceFile = new File("shoebill", "ONLINE_MODE_ONCE");
         if(!onlineModeOnceFile.exists())
             try {
-                onlineModeOnceFile.createNewFile();
+                if (!onlineModeOnceFile.createNewFile())
+                    throw new IOException("ONLINE_MODE_ONCE File could not be created.");
             } catch (IOException e) {
                 System.err.println(onlineModeOnceFile.toString() + " could not be created. Please make sure you deactivate offlineMode once.");
             }
